@@ -25,6 +25,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.apache.storm.spout.Scheme;
 import org.apache.storm.spout.SpoutOutputCollector;
@@ -122,7 +123,7 @@ public class SQLSpout extends AbstractQueryingSpout {
         final String bucketClause = (bucketNum >= 0) ? BUCKET_CLAUSE : "";
         final String limitClause = (maxNumResults != -1) ? LIMIT_CLAUSE : "";
 
-        preparedSql = String.format(BASE_SQL, tableName, bucketClause, limitClause);
+        preparedSql = String.format(Locale.ROOT, BASE_SQL, tableName, bucketClause, limitClause);
     }
 
     @Override
@@ -231,7 +232,7 @@ public class SQLSpout extends AbstractQueryingSpout {
         final String normalisedMetadata =
                 (metadata == null || metadata.startsWith("\t")) ? metadata : "\t" + metadata;
 
-        final String urlWithMetadata = String.format("%s%s", url, normalisedMetadata);
+        final String urlWithMetadata = String.format(Locale.ROOT, "%s%s", url, normalisedMetadata);
         final List<Object> v =
                 SCHEME.deserialize(
                         ByteBuffer.wrap(urlWithMetadata.getBytes(StandardCharsets.UTF_8)));

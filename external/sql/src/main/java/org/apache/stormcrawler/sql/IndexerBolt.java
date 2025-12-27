@@ -23,6 +23,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringUtils;
@@ -172,10 +173,11 @@ public class IndexerBolt extends AbstractIndexerBolt {
 
         final String updates =
                 keys.stream()
-                        .map(k -> String.format("%s=VALUES(%s)", k, k))
+                        .map(k -> String.format(Locale.ROOT, "%s=VALUES(%s)", k, k))
                         .collect(Collectors.joining(", "));
 
         return String.format(
+                Locale.ROOT,
                 """
                             INSERT INTO %s (%s%s)
                             VALUES (?%s)

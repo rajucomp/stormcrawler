@@ -23,6 +23,7 @@ import java.sql.Timestamp;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
@@ -105,17 +106,21 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
 
         updateQuery =
                 String.format(
+                        Locale.ROOT,
                         """
                                  REPLACE INTO %s %s
                          """,
-                        tableName, baseColumns);
+                        tableName,
+                        baseColumns);
 
         insertQuery =
                 String.format(
+                        Locale.ROOT,
                         """
                             INSERT IGNORE INTO %s %s
         """,
-                        tableName, baseColumns);
+                        tableName,
+                        baseColumns);
 
         ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
         executor.scheduleAtFixedRate(
