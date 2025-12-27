@@ -21,7 +21,10 @@ import static org.apache.stormcrawler.Constants.StatusStreamName;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.storm.metric.api.MultiCountMetric;
 import org.apache.storm.task.OutputCollector;
@@ -74,7 +77,7 @@ public class IndexerBolt extends AbstractIndexerBolt {
         String normalisedurl = valueForURL(tuple);
 
         Metadata metadata = (Metadata) tuple.getValueByField("metadata");
-        String text = tuple.getStringByField("text");
+        tuple.getStringByField("text");
 
         boolean keep = filterDocument(metadata);
         if (!keep) {
@@ -90,35 +93,9 @@ public class IndexerBolt extends AbstractIndexerBolt {
 
             // which metadata to display?
             Map<String, String[]> keyVals = filterMetadata(metadata);
+            List<String> keys = new ArrayList<>(keyVals.keySet());
 
-            StringBuilder query =
-                    new StringBuilder(" insert into ")
-                            .append(tableName)
-                            .append(" (")
-                            .append(fieldNameForURL());
-
-            Object[] keys = keyVals.keySet().toArray();
-
-            for (Object o : keys) {
-                query.append(", ").append((String) o);
-            }
-
-            query.append(") values(?");
-
-            for (int i = 0; i < keys.length; i++) {
-                query.append(", ?");
-            }
-
-            query.append(")");
-
-            query.append(" ON DUPLICATE KEY UPDATE ");
-            for (int i = 0; i < keys.length; i++) {
-                String key = (String) keys[i];
-                if (i > 0) {
-                    query.append(", ");
-                }
-                query.append(key).append("=VALUES(").append(key).append(")");
-            }
+            String query = getQuery(keys);
 
             if (connection == null) {
                 try {
@@ -131,30 +108,30 @@ public class IndexerBolt extends AbstractIndexerBolt {
 
             LOG.debug("PreparedStatement => {}", query);
 
-            // create the mysql insert preparedstatement
-            PreparedStatement preparedStmt = connection.prepareStatement(query.toString());
+            // create the mysql insert PreparedStatement
 
-            // TODO store the text of the document?
-            if (StringUtils.isNotBlank(fieldNameForText())) {
-                // builder.field(fieldNameForText(), trimText(text));
+            try (PreparedStatement preparedStmt = connection.prepareStatement(query)) {
+                // TODO store the text of the document?
+                if (StringUtils.isNotBlank(fieldNameForText())) {
+                    // builder.field(fieldNameForText(), trimText(text));
+                }
+
+                // send URL as field?
+                if (fieldNameForURL() != null) {
+                    preparedStmt.setString(1, normalisedurl);
+                }
+
+                for (int i = 0; i < keys.size(); i++) {
+                    insert(preparedStmt, i + 2, keys.get(i), keyVals);
+                    preparedStmt.addBatch();
+                }
+                preparedStmt.executeBatch();
+
+                eventCounter.scope("Indexed").incrBy(1);
+
+                _collector.emit(StatusStreamName, tuple, new Values(url, metadata, Status.FETCHED));
+                _collector.ack(tuple);
             }
-
-            // send URL as field?
-            if (fieldNameForURL() != null) {
-                preparedStmt.setString(1, normalisedurl);
-            }
-
-            for (int i = 0; i < keys.length; i++) {
-                insert(preparedStmt, i + 2, (String) keys[i], keyVals);
-            }
-
-            preparedStmt.executeUpdate();
-
-            eventCounter.scope("Indexed").incrBy(1);
-
-            _collector.emit(StatusStreamName, tuple, new Values(url, metadata, Status.FETCHED));
-            _collector.ack(tuple);
-
         } catch (Exception e) {
             // do not send to status stream so that it gets replayed
             LOG.error("Error inserting into SQL", e);
@@ -187,5 +164,27 @@ public class IndexerBolt extends AbstractIndexerBolt {
             value = values[0];
         }
         preparedStmt.setString(position, value);
+    }
+
+    private String getQuery(final List<String> keys) {
+        final String columns = String.join(", ", keys);
+        final String placeholders = keys.stream().map(k -> "?").collect(Collectors.joining(", "));
+
+        final String updates =
+                keys.stream()
+                        .map(k -> String.format("%s=VALUES(%s)", k, k))
+                        .collect(Collectors.joining(", "));
+
+        return String.format(
+                """
+                            INSERT INTO %s (%s%s)
+                            VALUES (?%s)
+                            ON DUPLICATE KEY UPDATE %s
+                            """,
+                tableName,
+                fieldNameForURL(),
+                columns.isEmpty() ? "" : ", " + columns,
+                placeholders.isEmpty() ? "" : ", " + placeholders,
+                updates);
     }
 }

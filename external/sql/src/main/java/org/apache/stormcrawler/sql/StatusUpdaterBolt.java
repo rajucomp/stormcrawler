@@ -52,17 +52,13 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
     private MultiCountMetric eventCounter;
 
     private Connection connection;
-    private String tableName;
 
     private URLPartitioner partitioner;
     private int maxNumBuckets = -1;
 
     private int batchMaxSize = 1000;
-    private float batchMaxIdleMsec = 2000;
 
     private int currentBatchSize = 0;
-
-    private PreparedStatement insertPreparedStmt = null;
 
     private long lastInsertBatchTime = -1;
 
@@ -88,7 +84,8 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
 
         this.eventCounter = context.registerMetric("counter", new MultiCountMetric(), 10);
 
-        tableName = ConfUtils.getString(stormConf, Constants.SQL_STATUS_TABLE_PARAM_NAME, "urls");
+        final String tableName =
+                ConfUtils.getString(stormConf, Constants.SQL_STATUS_TABLE_PARAM_NAME, "urls");
 
         batchMaxSize =
                 ConfUtils.getInt(stormConf, Constants.SQL_UPDATE_BATCH_SIZE_PARAM_NAME, 1000);
@@ -100,19 +97,25 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
             throw new RuntimeException(ex);
         }
 
-        String query =
-                tableName
-                        + " (url, status, nextfetchdate, metadata, bucket, host)"
-                        + " values (?, ?, ?, ?, ?, ?)";
+        final String baseColumns =
+                """
+                                (url, status, nextfetchdate, metadata, bucket, host)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                             """;
 
-        updateQuery = "REPLACE INTO " + query;
-        insertQuery = "INSERT IGNORE INTO " + query;
+        updateQuery =
+                String.format(
+                        """
+                                 REPLACE INTO %s %s
+                         """,
+                        tableName, baseColumns);
 
-        try {
-            insertPreparedStmt = connection.prepareStatement(insertQuery);
-        } catch (SQLException e) {
-            LOG.error(e.getMessage(), e);
-        }
+        insertQuery =
+                String.format(
+                        """
+                            INSERT IGNORE INTO %s %s
+        """,
+                        tableName, baseColumns);
 
         ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
         executor.scheduleAtFixedRate(
@@ -162,37 +165,30 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
             partition = Math.abs(partitionKey.hashCode() % maxNumBuckets);
         }
 
-        PreparedStatement preparedStmt = this.insertPreparedStmt;
-
         // create in table if does not already exist
         if (isUpdate) {
-            preparedStmt = connection.prepareStatement(updateQuery);
-        }
 
-        preparedStmt.setString(1, url);
-        preparedStmt.setString(2, status.toString());
-        if (nextFetch.isPresent()) {
-            final Timestamp tsp = Timestamp.from(nextFetch.get().toInstant());
-            preparedStmt.setObject(3, tsp);
-        } else {
-            // a value so large it means it will never be refetched
-            preparedStmt.setObject(3, NEVER);
-        }
-        preparedStmt.setString(4, mdAsString.toString());
-        preparedStmt.setInt(5, partition);
-        preparedStmt.setString(6, partitionKey);
+            try (PreparedStatement ps = connection.prepareStatement(updateQuery)) {
+                ps.setString(1, url);
+                ps.setString(2, status.toString());
+                if (nextFetch.isPresent()) {
+                    final Timestamp tsp = Timestamp.from(nextFetch.get().toInstant());
+                    ps.setObject(3, tsp);
+                } else {
+                    // a value so large it means it will never be refetched
+                    ps.setObject(3, NEVER);
+                }
+                ps.setString(4, mdAsString.toString());
+                ps.setInt(5, partition);
+                ps.setString(6, partitionKey);
 
-        // updates are not batched
-        if (isUpdate) {
-            preparedStmt.executeUpdate();
-            preparedStmt.close();
+                // updates are not batched
+                ps.executeUpdate();
+            }
             eventCounter.scope("sql_updates_number").incrBy(1);
             super.ack(t, url);
             return;
         }
-
-        // code below is for inserts i.e. DISCOVERED URLs
-        preparedStmt.addBatch();
 
         if (lastInsertBatchTime == -1) {
             lastInsertBatchTime = System.currentTimeMillis();
@@ -216,6 +212,7 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
         }
         long now = System.currentTimeMillis();
         // check whether the insert batches need executing
+        final float batchMaxIdleMsec = 2000;
         if ((currentBatchSize == batchMaxSize)) {
             LOG.info("About to execute batch - triggered by size");
         } else if (lastInsertBatchTime + (long) batchMaxIdleMsec < System.currentTimeMillis()) {
@@ -229,7 +226,12 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
 
         try {
             long start = System.currentTimeMillis();
-            insertPreparedStmt.executeBatch();
+            try (PreparedStatement ps = connection.prepareStatement(insertQuery)) {
+                // code below is for inserts i.e. DISCOVERED URLs
+                ps.addBatch();
+                ps.executeBatch();
+            }
+
             long end = System.currentTimeMillis();
 
             LOG.info("Batched {} inserts executed in {} msec", currentBatchSize, end - start);
@@ -253,9 +255,6 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
         lastInsertBatchTime = System.currentTimeMillis();
         currentBatchSize = 0;
         waitingAck.clear();
-
-        insertPreparedStmt.close();
-        insertPreparedStmt = connection.prepareStatement(insertQuery);
     }
 
     @Override
