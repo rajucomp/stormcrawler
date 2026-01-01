@@ -38,7 +38,7 @@ import org.testcontainers.utility.DockerImageName;
  */
 @Testcontainers(disabledWithoutDocker = true)
 @Timeout(value = 120, unit = TimeUnit.SECONDS)
-public abstract class AbstractSQLTest {
+abstract class AbstractSQLTest {
 
     private static final DockerImageName MYSQL_IMAGE = DockerImageName.parse("mysql:8.4.0");
 
@@ -50,16 +50,16 @@ public abstract class AbstractSQLTest {
                     .withPassword("crawler")
                     .withReuse(true);
 
-    protected static Connection testConnection;
+    static Connection testConnection;
 
-    protected static Connection createConnection() throws SQLException {
+    static Connection createConnection() throws SQLException {
         return DriverManager.getConnection(
                 MYSQL_CONTAINER.getJdbcUrl(),
                 MYSQL_CONTAINER.getUsername(),
                 MYSQL_CONTAINER.getPassword());
     }
 
-    protected static Map<String, String> createSqlConnectionConfig() {
+    static Map<String, String> createSqlConnectionConfig() {
         Map<String, String> sqlConnection = new HashMap<>();
         sqlConnection.put("url", MYSQL_CONTAINER.getJdbcUrl());
         sqlConnection.put("user", MYSQL_CONTAINER.getUsername());
