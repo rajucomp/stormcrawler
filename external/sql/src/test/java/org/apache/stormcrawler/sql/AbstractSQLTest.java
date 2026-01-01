@@ -21,9 +21,13 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Timeout;
 import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 /**
@@ -31,21 +35,19 @@ import org.testcontainers.utility.DockerImageName;
  * Testcontainers singleton pattern to ensure the container is created once and reused across all
  * test classes, improving test performance.
  */
+@Testcontainers(disabledWithoutDocker = true)
+@Timeout(value = 120, unit = TimeUnit.SECONDS)
 public abstract class AbstractSQLTest {
 
     private static final DockerImageName MYSQL_IMAGE = DockerImageName.parse("mysql:8.4.0");
 
-    private static final MySQLContainer<?> MYSQL_CONTAINER;
-
-    static {
-        MYSQL_CONTAINER =
-                new MySQLContainer<>(MYSQL_IMAGE)
-                        .withDatabaseName("crawl")
-                        .withUsername("crawler")
-                        .withPassword("crawler")
-                        .withReuse(true);
-        MYSQL_CONTAINER.start();
-    }
+    @Container
+    private static final MySQLContainer<?> MYSQL_CONTAINER =
+            new MySQLContainer<>(MYSQL_IMAGE)
+                    .withDatabaseName("crawl")
+                    .withUsername("crawler")
+                    .withPassword("crawler")
+                    .withReuse(true);
 
     protected Connection testConnection;
 
