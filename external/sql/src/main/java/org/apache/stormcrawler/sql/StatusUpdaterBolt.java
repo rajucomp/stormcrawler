@@ -16,6 +16,8 @@
  */
 package org.apache.stormcrawler.sql;
 
+import static org.apache.stormcrawler.sql.SQLUtil.closeResource;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -63,8 +65,8 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
 
     private long lastInsertBatchTime = -1;
 
-    private String updateQuery;
-    private String insertQuery;
+    private PreparedStatement updatePreparedStmt;
+    private PreparedStatement insertPreparedStmt;
 
     private final Map<String, List<Tuple>> waitingAck = new HashMap<>();
 
@@ -104,7 +106,7 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
                                 VALUES (?, ?, ?, ?, ?, ?)
                              """;
 
-        updateQuery =
+        final String updateQuery =
                 String.format(
                         Locale.ROOT,
                         """
@@ -113,7 +115,7 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
                         tableName,
                         baseColumns);
 
-        insertQuery =
+        final String insertQuery =
                 String.format(
                         Locale.ROOT,
                         """
@@ -121,6 +123,14 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
         """,
                         tableName,
                         baseColumns);
+
+        try {
+            updatePreparedStmt = connection.prepareStatement(updateQuery);
+            insertPreparedStmt = connection.prepareStatement(insertQuery);
+        } catch (SQLException e) {
+            LOG.error("Failed to prepare statements", e);
+            throw new RuntimeException(e);
+        }
 
         ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
         executor.scheduleAtFixedRate(
@@ -172,28 +182,25 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
 
         // create in table if does not already exist
         if (isUpdate) {
+            populate(
+                    url,
+                    status,
+                    nextFetch,
+                    mdAsString,
+                    partition,
+                    partitionKey,
+                    updatePreparedStmt);
 
-            try (PreparedStatement ps = connection.prepareStatement(updateQuery)) {
-                ps.setString(1, url);
-                ps.setString(2, status.toString());
-                if (nextFetch.isPresent()) {
-                    final Timestamp tsp = Timestamp.from(nextFetch.get().toInstant());
-                    ps.setObject(3, tsp);
-                } else {
-                    // a value so large it means it will never be refetched
-                    ps.setObject(3, NEVER);
-                }
-                ps.setString(4, mdAsString.toString());
-                ps.setInt(5, partition);
-                ps.setString(6, partitionKey);
-
-                // updates are not batched
-                ps.executeUpdate();
-            }
+            // updates are not batched
+            updatePreparedStmt.executeUpdate();
             eventCounter.scope("sql_updates_number").incrBy(1);
             super.ack(t, url);
             return;
         }
+
+        // code below is for inserts i.e. DISCOVERED URLs
+        populate(url, status, nextFetch, mdAsString, partition, partitionKey, insertPreparedStmt);
+        insertPreparedStmt.addBatch();
 
         if (lastInsertBatchTime == -1) {
             lastInsertBatchTime = System.currentTimeMillis();
@@ -209,6 +216,29 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
         currentBatchSize++;
 
         eventCounter.scope("sql_inserts_number").incrBy(1);
+    }
+
+    private void populate(
+            final String url,
+            final Status status,
+            final Optional<Date> nextFetch,
+            final StringBuilder mdAsString,
+            final int partition,
+            final String partitionKey,
+            final PreparedStatement preparedStmt)
+            throws SQLException {
+        preparedStmt.setString(1, url);
+        preparedStmt.setString(2, status.toString());
+        if (nextFetch.isPresent()) {
+            final Timestamp tsp = Timestamp.from(nextFetch.get().toInstant());
+            preparedStmt.setObject(3, tsp);
+        } else {
+            // a value so large it means it will never be refetched
+            preparedStmt.setObject(3, NEVER);
+        }
+        preparedStmt.setString(4, mdAsString.toString());
+        preparedStmt.setInt(5, partition);
+        preparedStmt.setString(6, partitionKey);
     }
 
     private synchronized void checkExecuteBatch() throws SQLException {
@@ -231,12 +261,7 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
 
         try {
             long start = System.currentTimeMillis();
-            try (PreparedStatement ps = connection.prepareStatement(insertQuery)) {
-                // code below is for inserts i.e. DISCOVERED URLs
-                ps.addBatch();
-                ps.executeBatch();
-            }
-
+            insertPreparedStmt.executeBatch();
             long end = System.currentTimeMillis();
 
             LOG.info("Batched {} inserts executed in {} msec", currentBatchSize, end - start);
@@ -264,10 +289,8 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
 
     @Override
     public void cleanup() {
-        if (connection != null)
-            try {
-                connection.close();
-            } catch (SQLException e) {
-            }
+        closeResource(updatePreparedStmt, "update prepared statement");
+        closeResource(insertPreparedStmt, "insert prepared statement");
+        closeResource(connection, "connection");
     }
 }
