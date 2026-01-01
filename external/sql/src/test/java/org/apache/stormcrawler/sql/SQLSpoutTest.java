@@ -44,7 +44,7 @@ class SQLSpoutTest extends AbstractSQLTest {
     @Override
     protected void setupTestTables() throws Exception {
         try (Statement stmt = testConnection.createStatement()) {
-            stmt.executeQuery("DROP TABLE IF EXISTS urls");
+            stmt.execute("DROP TABLE IF EXISTS urls");
             stmt.execute(
                     """
                 CREATE TABLE IF NOT EXISTS urls (

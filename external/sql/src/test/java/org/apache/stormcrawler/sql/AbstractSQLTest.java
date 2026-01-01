@@ -65,7 +65,7 @@ public abstract class AbstractSQLTest {
     }
 
     @BeforeEach
-    void setup() throws Exception {
+    void baseSetup() throws Exception {
         testConnection = createConnection();
         setupTestTables();
     }
@@ -77,6 +77,5 @@ public abstract class AbstractSQLTest {
         if (testConnection != null) {
             testConnection.close();
         }
-        MYSQL_CONTAINER.close();
     }
 }

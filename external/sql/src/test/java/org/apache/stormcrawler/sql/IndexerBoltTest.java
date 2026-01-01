@@ -47,7 +47,7 @@ class IndexerBoltTest extends AbstractSQLTest {
     private final String tableName = "content";
 
     @Override
-    public void setupTestTables() throws Exception {
+    protected void setupTestTables() throws Exception {
         try (Statement stmt = testConnection.createStatement()) {
             stmt.execute(
                     """
