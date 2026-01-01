@@ -21,8 +21,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Field;
-import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
@@ -39,42 +37,17 @@ import org.apache.storm.task.TopologyContext;
 import org.apache.stormcrawler.TestOutputCollector;
 import org.apache.stormcrawler.TestUtil;
 import org.apache.stormcrawler.persistence.urlbuffer.URLBuffer;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
-@Testcontainers(disabledWithoutDocker = true)
-class SQLSpoutTest {
+class SQLSpoutTest extends AbstractSQLTest {
 
-    private static final DockerImageName MYSQL_IMAGE = DockerImageName.parse("mysql:8.4.0");
-
-    @Container
-    private static final MySQLContainer<?> mysqlContainer =
-            new MySQLContainer<>(MYSQL_IMAGE)
-                    .withDatabaseName("crawl")
-                    .withUsername("crawler")
-                    .withPassword("crawler");
-
-    private static Connection testConnection;
-
-    @BeforeAll
-    static void beforeAll() throws Exception {
-        // Create table
-        testConnection =
-                DriverManager.getConnection(
-                        mysqlContainer.getJdbcUrl(),
-                        mysqlContainer.getUsername(),
-                        mysqlContainer.getPassword());
-
+    @Override
+    protected void setupTestTables() throws Exception {
         try (Statement stmt = testConnection.createStatement()) {
+            stmt.executeQuery("DROP TABLE IF EXISTS urls");
             stmt.execute(
                     """
-                CREATE TABLE urls (
+                CREATE TABLE IF NOT EXISTS urls (
                     url VARCHAR(255),
                     status VARCHAR(16) DEFAULT 'DISCOVERED',
                     nextfetchdate TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -85,23 +58,8 @@ class SQLSpoutTest {
                 )
                 """);
 
-            // Add indexes
-            stmt.execute("ALTER TABLE urls ADD INDEX b (`bucket`)");
-            stmt.execute("ALTER TABLE urls ADD INDEX t (`nextfetchdate`)");
-            stmt.execute("ALTER TABLE urls ADD INDEX h (`host`)");
-        }
-    }
-
-    @BeforeEach
-    void setup() throws Exception {
-        // Clear any existing test data
-        clearAllURLs();
-    }
-
-    @AfterAll
-    static void afterAll() throws Exception {
-        if (testConnection != null) {
-            testConnection.close();
+            // Clear any existing test data
+            stmt.execute("DELETE FROM urls");
         }
     }
 
@@ -219,8 +177,7 @@ class SQLSpoutTest {
         }
     }
 
-    private static void insertTestURL(String url, int bucket, String host, Instant time)
-            throws Exception {
+    private void insertTestURL(String url, int bucket, String host, Instant time) throws Exception {
         String sql =
                 """
     INSERT INTO urls (url, status, nextfetchdate, metadata, bucket, host)
@@ -238,21 +195,10 @@ class SQLSpoutTest {
         }
     }
 
-    /** Helper method to clear all URLs from the database between tests. */
-    private static void clearAllURLs() throws Exception {
-        try (Statement stmt = testConnection.createStatement()) {
-            stmt.execute("DELETE FROM urls");
-        }
-    }
-
     private Map<String, Object> createTestConfig() {
         Map<String, Object> conf = new HashMap<>();
 
-        Map<String, String> sqlConnection = new HashMap<>();
-        sqlConnection.put("url", mysqlContainer.getJdbcUrl());
-        sqlConnection.put("user", mysqlContainer.getUsername());
-        sqlConnection.put("password", mysqlContainer.getPassword());
-        conf.put("sql.connection", sqlConnection);
+        conf.put("sql.connection", createSqlConnectionConfig());
 
         conf.put("sql.status.table", "urls");
         conf.put("sql.max.urls.per.bucket", 5);

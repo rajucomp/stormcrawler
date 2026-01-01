@@ -22,8 +22,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.HashMap;
@@ -34,41 +32,17 @@ import org.apache.stormcrawler.Metadata;
 import org.apache.stormcrawler.TestOutputCollector;
 import org.apache.stormcrawler.TestUtil;
 import org.apache.stormcrawler.persistence.Status;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
-@Testcontainers(disabledWithoutDocker = true)
-class StatusUpdaterBoltTest {
+class StatusUpdaterBoltTest extends AbstractSQLTest {
 
-    private static final DockerImageName MYSQL_IMAGE = DockerImageName.parse("mysql:8.4.0");
-
-    @Container
-    private static final MySQLContainer<?> mysqlContainer =
-            new MySQLContainer<>(MYSQL_IMAGE)
-                    .withDatabaseName("crawl")
-                    .withUsername("crawler")
-                    .withPassword("crawler");
-
-    private Connection testConnection;
     private TestOutputCollector output;
 
-    @BeforeEach
-    void setup() throws Exception {
-        output = new TestOutputCollector();
-        // Create table
-        testConnection =
-                DriverManager.getConnection(
-                        mysqlContainer.getJdbcUrl(),
-                        mysqlContainer.getUsername(),
-                        mysqlContainer.getPassword());
-
+    @Override
+    protected void setupTestTables() throws Exception {
         try (Statement stmt = testConnection.createStatement()) {
-
+            stmt.executeQuery("DROP TABLE IF EXISTS urls");
             stmt.execute(
                     """
                     CREATE TABLE IF NOT EXISTS urls (
@@ -81,14 +55,14 @@ class StatusUpdaterBoltTest {
                         PRIMARY KEY(url)
                     )
                     """);
+            // Clear table before each test
+            stmt.execute("TRUNCATE TABLE urls");
         }
     }
 
-    @AfterEach
-    void cleanup() throws Exception {
-        if (testConnection != null) {
-            testConnection.close();
-        }
+    @BeforeEach
+    void setup() {
+        output = new TestOutputCollector();
     }
 
     @Test
@@ -152,11 +126,7 @@ class StatusUpdaterBoltTest {
     private Map<String, Object> createTestConfig() {
         Map<String, Object> conf = new HashMap<>();
 
-        Map<String, String> sqlConnection = new HashMap<>();
-        sqlConnection.put("url", mysqlContainer.getJdbcUrl());
-        sqlConnection.put("user", mysqlContainer.getUsername());
-        sqlConnection.put("password", mysqlContainer.getPassword());
-        conf.put("sql.connection", sqlConnection);
+        conf.put("sql.connection", createSqlConnectionConfig());
 
         conf.put("sql.status.table", "urls");
         conf.put("sql.status.max.urls.per.bucket", 10);

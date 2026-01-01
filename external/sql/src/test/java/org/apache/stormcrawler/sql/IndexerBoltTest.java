@@ -23,8 +23,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
@@ -40,40 +38,16 @@ import org.apache.stormcrawler.TestUtil;
 import org.apache.stormcrawler.indexing.AbstractIndexerBolt;
 import org.apache.stormcrawler.persistence.Status;
 import org.apache.stormcrawler.util.RobotsTags;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
-@Testcontainers(disabledWithoutDocker = true)
-class IndexerBoltTest {
+class IndexerBoltTest extends AbstractSQLTest {
 
-    private static final DockerImageName MYSQL_IMAGE = DockerImageName.parse("mysql:8.4.0");
-
-    @Container
-    private static final MySQLContainer<?> mysqlContainer =
-            new MySQLContainer<>(MYSQL_IMAGE)
-                    .withDatabaseName("crawl")
-                    .withUsername("crawler")
-                    .withPassword("crawler");
-
-    private Connection testConnection;
     private TestOutputCollector output;
     private final String tableName = "content";
 
-    @BeforeEach
-    void setup() throws Exception {
-        output = new TestOutputCollector();
-        testConnection =
-                DriverManager.getConnection(
-                        mysqlContainer.getJdbcUrl(),
-                        mysqlContainer.getUsername(),
-                        mysqlContainer.getPassword());
-
-        // Create content table for indexing using the configured table name
+    @Override
+    public void setupTestTables() throws Exception {
         try (Statement stmt = testConnection.createStatement()) {
             stmt.execute(
                     """
@@ -89,11 +63,9 @@ class IndexerBoltTest {
         }
     }
 
-    @AfterEach
-    void cleanup() throws Exception {
-        if (testConnection != null) {
-            testConnection.close();
-        }
+    @BeforeEach
+    void setup() {
+        output = new TestOutputCollector();
     }
 
     @Test
@@ -338,11 +310,7 @@ class IndexerBoltTest {
     private Map<String, Object> createBasicConfig() {
         Map<String, Object> conf = new HashMap<>();
 
-        Map<String, String> sqlConnection = new HashMap<>();
-        sqlConnection.put("url", mysqlContainer.getJdbcUrl());
-        sqlConnection.put("user", mysqlContainer.getUsername());
-        sqlConnection.put("password", mysqlContainer.getPassword());
-        conf.put("sql.connection", sqlConnection);
+        conf.put("sql.connection", createSqlConnectionConfig());
 
         conf.put(IndexerBolt.SQL_INDEX_TABLE_PARAM_NAME, tableName);
         conf.put(AbstractIndexerBolt.urlFieldParamName, "url");
