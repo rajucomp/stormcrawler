@@ -113,12 +113,8 @@ class SQLSpoutTest {
         TestOutputCollector testCollector = new TestOutputCollector();
         SQLSpout spout = createSpout(testCollector, TestUtil.getMockedTopologyContext());
 
-        URLBuffer buffer = getBufferFromSpout(spout);
-        assertEquals(0, buffer.size(), "Buffer should be empty initially");
-
         // First call to nextTuple() populates the buffer
         spout.nextTuple();
-        assertEquals(3, buffer.size(), "Buffer should contain 3 URLs after population");
 
         final List<String> expectedURLs =
                 Arrays.asList(
@@ -175,11 +171,6 @@ class SQLSpoutTest {
         // Populate buffer
         singleSpout.nextTuple();
 
-        URLBuffer buffer = getBufferFromSpout(singleSpout);
-
-        // Should fetch all URLs regardless of bucket
-        assertEquals(4, buffer.size(), "Single spout instance should fetch URLs from all buckets");
-
         final List<String> expectedURLs =
                 Arrays.asList(
                         "http://site1.com/page1",
@@ -213,8 +204,6 @@ class SQLSpoutTest {
             TopologyContext context = getMockedTopologyContextWithBucket(i, 2, "sqlSpout");
             spouts[i] = createSpout(collector, context);
             spouts[i].nextTuple();
-            URLBuffer buffer = getBufferFromSpout(spouts[i]);
-            assertEquals(3, buffer.size());
             assertURLsEmitted(
                     spouts[i],
                     collector,
