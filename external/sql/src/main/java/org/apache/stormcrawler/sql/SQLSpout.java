@@ -76,6 +76,7 @@ public class SQLSpout extends AbstractQueryingSpout {
     private static String preparedSql;
 
     private Connection connection;
+    private PreparedStatement ps;
 
     /**
      * if more than one instance of the spout exist, each one is in charge of a separate bucket
@@ -124,6 +125,13 @@ public class SQLSpout extends AbstractQueryingSpout {
         final String limitClause = (maxNumResults != -1) ? LIMIT_CLAUSE : "";
 
         preparedSql = String.format(Locale.ROOT, BASE_SQL, tableName, bucketClause, limitClause);
+
+        try {
+            ps = connection.prepareStatement(preparedSql);
+        } catch (SQLException e) {
+            LOG.error("Failed to prepare statement", e);
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -158,7 +166,7 @@ public class SQLSpout extends AbstractQueryingSpout {
 
         long timeStartQuery = System.currentTimeMillis();
 
-        try (PreparedStatement ps = connection.prepareStatement(preparedSql)) {
+        try {
             int i = 1;
             ps.setTimestamp(i++, new Timestamp(lastNextFetchDate.toEpochMilli()));
 
@@ -206,11 +214,8 @@ public class SQLSpout extends AbstractQueryingSpout {
     @Override
     public void close() {
         super.close();
-        try {
-            connection.close();
-        } catch (SQLException e) {
-            LOG.error("Exception caught while closing SQL connection", e);
-        }
+        SQLUtil.closeResource(ps, "prepared statement");
+        SQLUtil.closeResource(connection, "connection");
     }
 
     private long recordQueryTiming(long timeStartQuery) {

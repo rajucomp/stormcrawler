@@ -24,6 +24,8 @@ import java.util.Properties;
 
 public class SQLUtil {
 
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(SQLUtil.class);
+
     private SQLUtil() {}
 
     public static Connection getConnection(Map<String, Object> stormConf) throws SQLException {
@@ -46,5 +48,15 @@ public class SQLUtil {
         props.putAll(sqlConf);
 
         return DriverManager.getConnection(url, props);
+    }
+
+    public static void closeResource(final AutoCloseable resource, final String resourceName) {
+        if (resource != null) {
+            try {
+                resource.close();
+            } catch (Exception e) {
+                LOG.error("Error closing {}", resourceName, e);
+            }
+        }
     }
 }
