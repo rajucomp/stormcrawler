@@ -101,9 +101,10 @@ class StatusUpdaterBoltTest {
         Tuple tuple = createTuple(url, Status.DISCOVERED, metadata);
         bolt.execute(tuple);
 
-        // DISCOVERED URLs are batched and the batch executes after 2 seconds (batchMaxIdleMsec)
-        // Wait long enough for the batch to be executed
-        Thread.sleep(3000);
+        // Trigger batch execution by sending another tuple (which will also check the batch)
+        String url2 = "http://example.com/page1-trigger";
+        Tuple triggerTuple = createTuple(url2, Status.DISCOVERED, metadata);
+        bolt.execute(triggerTuple);
 
         // Verify URL was stored
         try (Statement stmt = testConnection.createStatement();
@@ -160,8 +161,8 @@ class StatusUpdaterBoltTest {
         conf.put("sql.status.table", "urls");
         conf.put("sql.status.max.urls.per.bucket", 10);
         conf.put("scheduler.class", "org.apache.stormcrawler.persistence.DefaultScheduler");
-        // Add cache configuration to prevent NullPointerException
         conf.put("status.updater.cache.spec", "maximumSize=10000,expireAfterAccess=1h");
+        conf.put("sql.update.batch.size", 1);
 
         return conf;
     }
