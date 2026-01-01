@@ -48,19 +48,19 @@ class IndexerBoltTest extends AbstractSQLTest {
 
     @Override
     protected void setupTestTables() throws Exception {
-        try (Statement stmt = testConnection.createStatement()) {
-            stmt.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS content (
-                        url VARCHAR(255) PRIMARY KEY,
-                        title VARCHAR(255),
-                        description TEXT,
-                        keywords VARCHAR(255)
-                    )
-                    """);
-            // Clear table before each test
-            stmt.execute("TRUNCATE TABLE content");
-        }
+        execute(
+                """
+                DROP TABLE IF EXISTS content
+                """);
+        execute(
+                """
+                CREATE TABLE IF NOT EXISTS content (
+                    url VARCHAR(255) PRIMARY KEY,
+                    title VARCHAR(255),
+                    description TEXT,
+                    keywords VARCHAR(255)
+                )
+                """);
     }
 
     @BeforeEach

@@ -19,6 +19,7 @@ package org.apache.stormcrawler.sql;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -65,6 +66,12 @@ abstract class AbstractSQLTest {
         sqlConnection.put("user", MYSQL_CONTAINER.getUsername());
         sqlConnection.put("password", MYSQL_CONTAINER.getPassword());
         return sqlConnection;
+    }
+
+    void execute(String sql) throws SQLException {
+        try (Statement stmt = testConnection.createStatement()) {
+            stmt.execute(sql);
+        }
     }
 
     @BeforeAll

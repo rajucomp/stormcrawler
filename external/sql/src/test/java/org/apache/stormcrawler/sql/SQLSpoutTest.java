@@ -22,7 +22,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Field;
 import java.sql.PreparedStatement;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -43,10 +42,9 @@ class SQLSpoutTest extends AbstractSQLTest {
 
     @Override
     protected void setupTestTables() throws Exception {
-        try (Statement stmt = testConnection.createStatement()) {
-            stmt.execute("DROP TABLE IF EXISTS urls");
-            stmt.execute(
-                    """
+        execute("DROP TABLE IF EXISTS urls");
+        execute(
+                """
                 CREATE TABLE IF NOT EXISTS urls (
                     url VARCHAR(255),
                     status VARCHAR(16) DEFAULT 'DISCOVERED',
@@ -57,10 +55,6 @@ class SQLSpoutTest extends AbstractSQLTest {
                     PRIMARY KEY(url)
                 )
                 """);
-
-            // Clear any existing test data
-            stmt.execute("DELETE FROM urls");
-        }
     }
 
     @Test

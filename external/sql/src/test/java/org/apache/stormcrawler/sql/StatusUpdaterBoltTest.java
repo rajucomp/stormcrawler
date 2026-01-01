@@ -41,23 +41,19 @@ class StatusUpdaterBoltTest extends AbstractSQLTest {
 
     @Override
     protected void setupTestTables() throws Exception {
-        try (Statement stmt = testConnection.createStatement()) {
-            stmt.execute("DROP TABLE IF EXISTS urls");
-            stmt.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS urls (
-                        url VARCHAR(255),
-                        status VARCHAR(16) DEFAULT 'DISCOVERED',
-                        nextfetchdate TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        metadata TEXT,
-                        bucket SMALLINT DEFAULT 0,
-                        host VARCHAR(128),
-                        PRIMARY KEY(url)
-                    )
-                    """);
-            // Clear table before each test
-            stmt.execute("TRUNCATE TABLE urls");
-        }
+        execute("DROP TABLE IF EXISTS urls");
+        execute(
+                """
+                CREATE TABLE IF NOT EXISTS urls (
+                    url VARCHAR(255),
+                    status VARCHAR(16) DEFAULT 'DISCOVERED',
+                    nextfetchdate TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    metadata TEXT,
+                    bucket SMALLINT DEFAULT 0,
+                    host VARCHAR(128),
+                    PRIMARY KEY(url)
+                )
+                """);
     }
 
     @BeforeEach
