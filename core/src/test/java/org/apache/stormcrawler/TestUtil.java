@@ -23,6 +23,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import org.apache.storm.metric.api.IMetric;
 import org.apache.storm.task.TopologyContext;
@@ -45,6 +47,42 @@ public class TestUtil {
                                 return invocation.getArgument(1, IMetric.class);
                             }
                         });
+        return context;
+    }
+
+    /**
+     * Creates a mocked TopologyContext for testing bucket partitioning.
+     *
+     * @param taskIndex The task index for this spout instance (determines bucket number)
+     * @param totalTasks Total number of tasks in the topology
+     * @param componentId The component ID
+     * @return Mocked TopologyContext
+     */
+    public static TopologyContext getMockedTopologyContextWithBucket(
+            int taskIndex, int totalTasks, String componentId) {
+        TopologyContext context = mock(TopologyContext.class);
+
+        // Mock metric registration
+        when(context.registerMetric(anyString(), any(IMetric.class), anyInt()))
+                .thenAnswer(
+                        new Answer<IMetric>() {
+                            @Override
+                            public IMetric answer(InvocationOnMock invocation) throws Throwable {
+                                return invocation.getArgument(1, IMetric.class);
+                            }
+                        });
+
+        // Mock task information for bucket assignment
+        when(context.getThisTaskIndex()).thenReturn(taskIndex);
+        when(context.getThisComponentId()).thenReturn(componentId);
+
+        // Create list of task IDs (0 to totalTasks-1)
+        List<Integer> taskIds = new ArrayList<>();
+        for (int i = 0; i < totalTasks; i++) {
+            taskIds.add(i);
+        }
+        when(context.getComponentTasks(componentId)).thenReturn(taskIds);
+
         return context;
     }
 
