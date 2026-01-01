@@ -46,11 +46,13 @@ public class IndexerBolt extends AbstractIndexerBolt {
 
     public static final String SQL_INDEX_TABLE_PARAM_NAME = "sql.index.table";
 
-    private OutputCollector _collector;
+    private OutputCollector collector;
 
     private MultiCountMetric eventCounter;
 
     private Connection connection;
+
+    private PreparedStatement preparedStmt;
 
     private String tableName;
 
@@ -60,7 +62,7 @@ public class IndexerBolt extends AbstractIndexerBolt {
     public void prepare(
             Map<String, Object> conf, TopologyContext context, OutputCollector collector) {
         super.prepare(conf, context, collector);
-        _collector = collector;
+        this.collector = collector;
 
         this.eventCounter = context.registerMetric("SQLIndexer", new MultiCountMetric(), 10);
 
@@ -85,8 +87,8 @@ public class IndexerBolt extends AbstractIndexerBolt {
             eventCounter.scope("Filtered").incrBy(1);
             // treat it as successfully processed even if
             // we do not index it
-            _collector.emit(StatusStreamName, tuple, new Values(url, metadata, Status.FETCHED));
-            _collector.ack(tuple);
+            collector.emit(StatusStreamName, tuple, new Values(url, metadata, Status.FETCHED));
+            collector.ack(tuple);
             return;
         }
 
@@ -110,33 +112,32 @@ public class IndexerBolt extends AbstractIndexerBolt {
             LOG.debug("PreparedStatement => {}", query);
 
             // create the mysql insert PreparedStatement
-
-            try (PreparedStatement preparedStmt = connection.prepareStatement(query)) {
-                // TODO store the text of the document?
-                if (StringUtils.isNotBlank(fieldNameForText())) {
-                    // builder.field(fieldNameForText(), trimText(text));
-                }
-
-                // send URL as field?
-                if (fieldNameForURL() != null) {
-                    preparedStmt.setString(1, normalisedurl);
-                }
-
-                for (int i = 0; i < keys.size(); i++) {
-                    insert(preparedStmt, i + 2, keys.get(i), keyVals);
-                    preparedStmt.addBatch();
-                }
-                preparedStmt.executeBatch();
-
-                eventCounter.scope("Indexed").incrBy(1);
-
-                _collector.emit(StatusStreamName, tuple, new Values(url, metadata, Status.FETCHED));
-                _collector.ack(tuple);
+            preparedStmt = connection.prepareStatement(query);
+            // TODO store the text of the document?
+            if (StringUtils.isNotBlank(fieldNameForText())) {
+                // builder.field(fieldNameForText(), trimText(text));
             }
+
+            // send URL as field?
+            if (fieldNameForURL() != null) {
+                preparedStmt.setString(1, normalisedurl);
+            }
+
+            // Set all metadata parameters
+            for (int i = 0; i < keys.size(); i++) {
+                insert(preparedStmt, i + 2, keys.get(i), keyVals);
+            }
+            // Execute the statement (single row insert)
+            preparedStmt.executeUpdate();
+
+            eventCounter.scope("Indexed").incrBy(1);
+
+            collector.emit(StatusStreamName, tuple, new Values(url, metadata, Status.FETCHED));
+            collector.ack(tuple);
         } catch (Exception e) {
             // do not send to status stream so that it gets replayed
             LOG.error("Error inserting into SQL", e);
-            _collector.fail(tuple);
+            collector.fail(tuple);
             if (connection != null) {
                 // reset the connection
                 try {
@@ -176,6 +177,14 @@ public class IndexerBolt extends AbstractIndexerBolt {
                         .map(k -> String.format(Locale.ROOT, "%s=VALUES(%s)", k, k))
                         .collect(Collectors.joining(", "));
 
+        // Build the ON DUPLICATE KEY UPDATE clause
+        // If there are metadata keys, update them; otherwise, update the URL field to itself
+        final String updateClause =
+                updates.isEmpty()
+                        ? String.format(
+                                Locale.ROOT, "%s=VALUES(%s)", fieldNameForURL(), fieldNameForURL())
+                        : updates;
+
         return String.format(
                 Locale.ROOT,
                 """
@@ -187,6 +196,12 @@ public class IndexerBolt extends AbstractIndexerBolt {
                 fieldNameForURL(),
                 columns.isEmpty() ? "" : ", " + columns,
                 placeholders.isEmpty() ? "" : ", " + placeholders,
-                updates);
+                updateClause);
+    }
+
+    @Override
+    public void cleanup() {
+        SQLUtil.closeResource(preparedStmt, "prepared statement");
+        SQLUtil.closeResource(connection, "connection");
     }
 }

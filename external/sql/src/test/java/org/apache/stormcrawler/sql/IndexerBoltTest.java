@@ -1,0 +1,365 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to you under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.stormcrawler.sql;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import org.apache.storm.task.OutputCollector;
+import org.apache.storm.tuple.Tuple;
+import org.apache.stormcrawler.Constants;
+import org.apache.stormcrawler.Metadata;
+import org.apache.stormcrawler.TestOutputCollector;
+import org.apache.stormcrawler.TestUtil;
+import org.apache.stormcrawler.indexing.AbstractIndexerBolt;
+import org.apache.stormcrawler.persistence.Status;
+import org.apache.stormcrawler.util.RobotsTags;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+
+@Testcontainers(disabledWithoutDocker = true)
+class IndexerBoltTest {
+
+    private static final DockerImageName MYSQL_IMAGE = DockerImageName.parse("mysql:8.4.0");
+
+    @Container
+    private static final MySQLContainer<?> mysqlContainer =
+            new MySQLContainer<>(MYSQL_IMAGE)
+                    .withDatabaseName("crawl")
+                    .withUsername("crawler")
+                    .withPassword("crawler");
+
+    private Connection testConnection;
+    private TestOutputCollector output;
+    private final String tableName = "content";
+
+    @BeforeEach
+    void setup() throws Exception {
+        output = new TestOutputCollector();
+        testConnection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword());
+
+        // Create content table for indexing using the configured table name
+        try (Statement stmt = testConnection.createStatement()) {
+            stmt.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS content (
+                        url VARCHAR(255) PRIMARY KEY,
+                        title VARCHAR(255),
+                        description TEXT,
+                        keywords VARCHAR(255)
+                    )
+                    """);
+            // Clear table before each test
+            stmt.execute("TRUNCATE TABLE content");
+        }
+    }
+
+    @AfterEach
+    void cleanup() throws Exception {
+        if (testConnection != null) {
+            testConnection.close();
+        }
+    }
+
+    @Test
+    void testBasicIndexing() throws Exception {
+        IndexerBolt bolt = createBolt(createBasicConfig());
+
+        String url = "http://example.com/page1";
+        String text = "This is the page content";
+        Metadata metadata = new Metadata();
+        metadata.addValue("title", "Test Page Title");
+        metadata.addValue("description", "Test page description");
+        metadata.addValue("keywords", "test, page, keywords");
+
+        Tuple tuple = createTuple(url, text, metadata);
+        bolt.execute(tuple);
+
+        // Verify URL was stored in database
+        try (Statement stmt = testConnection.createStatement();
+                ResultSet rs =
+                        stmt.executeQuery(
+                                "SELECT * FROM " + tableName + " WHERE url = '" + url + "'")) {
+            assertTrue(rs.next(), "URL should be stored in database");
+            assertEquals(url, rs.getString("url"));
+            assertEquals("Test Page Title", rs.getString("title"));
+            assertEquals("Test page description", rs.getString("description"));
+            assertEquals("test, page, keywords", rs.getString("keywords"));
+        }
+
+        // Verify tuple was acked and status emitted
+        assertEquals(1, output.getAckedTuples().size());
+        assertEquals(1, output.getEmitted(Constants.StatusStreamName).size());
+
+        // Verify emitted status is FETCHED
+        List<Object> emitted = output.getEmitted(Constants.StatusStreamName).get(0);
+        assertEquals(url, emitted.get(0));
+        assertEquals(Status.FETCHED, emitted.get(2));
+        bolt.cleanup();
+    }
+
+    @Test
+    void testDuplicateHandling() throws Exception {
+        IndexerBolt bolt = createBolt(createBasicConfig());
+
+        String url = "http://example.com/page2";
+
+        // First indexing
+        Metadata metadata1 = new Metadata();
+        metadata1.addValue("title", "Original Title");
+        metadata1.addValue("description", "Original description");
+
+        Tuple tuple1 = createTuple(url, "Original content", metadata1);
+        bolt.execute(tuple1);
+
+        // Verify first insert
+        try (Statement stmt = testConnection.createStatement();
+                ResultSet rs =
+                        stmt.executeQuery(
+                                "SELECT * FROM " + tableName + " WHERE url = '" + url + "'")) {
+            assertTrue(rs.next());
+            assertEquals("Original Title", rs.getString("title"));
+        }
+
+        // Second indexing with updated content (same URL)
+        Metadata metadata2 = new Metadata();
+        metadata2.addValue("title", "Updated Title");
+        metadata2.addValue("description", "Updated description");
+
+        Tuple tuple2 = createTuple(url, "Updated content", metadata2);
+        bolt.execute(tuple2);
+
+        // Verify ON DUPLICATE KEY UPDATE worked - should have updated values
+        try (Statement stmt = testConnection.createStatement();
+                ResultSet rs =
+                        stmt.executeQuery(
+                                "SELECT * FROM " + tableName + " WHERE url = '" + url + "'")) {
+            assertTrue(rs.next());
+            assertEquals("Updated Title", rs.getString("title"));
+            assertEquals("Updated description", rs.getString("description"));
+            // Should only be one row
+            assertFalse(rs.next(), "Should only have one row for the URL");
+        }
+
+        // Verify both tuples were acked
+        assertEquals(2, output.getAckedTuples().size());
+        bolt.cleanup();
+    }
+
+    @Test
+    void testFilteringByRobotsNoIndex() throws Exception {
+        IndexerBolt bolt = createBolt(createBasicConfig());
+
+        String url = "http://example.com/noindex-page";
+        Metadata metadata = new Metadata();
+        metadata.addValue("title", "Should Not Be Indexed");
+        metadata.addValue(RobotsTags.ROBOTS_NO_INDEX, "true");
+
+        Tuple tuple = createTuple(url, "Content", metadata);
+        bolt.execute(tuple);
+
+        // Verify URL was NOT stored in database
+        try (Statement stmt = testConnection.createStatement();
+                ResultSet rs =
+                        stmt.executeQuery(
+                                "SELECT * FROM " + tableName + " WHERE url = '" + url + "'")) {
+            assertFalse(rs.next(), "URL with noindex should not be stored in database");
+        }
+
+        // But tuple should still be acked and FETCHED status emitted
+        assertEquals(1, output.getAckedTuples().size());
+        assertEquals(1, output.getEmitted(Constants.StatusStreamName).size());
+
+        List<Object> emitted = output.getEmitted(Constants.StatusStreamName).get(0);
+        assertEquals(Status.FETCHED, emitted.get(2));
+        bolt.cleanup();
+    }
+
+    @Test
+    void testFilteringByMetadataFilter() throws Exception {
+        // Configure filter to only index documents with indexable=yes
+        Map<String, Object> conf = createBasicConfig();
+        conf.put(AbstractIndexerBolt.metadataFilterParamName, "indexable=yes");
+
+        IndexerBolt bolt = createBolt(conf);
+
+        // Document that should be filtered out (no indexable metadata)
+        String url1 = "http://example.com/filtered-page";
+        Metadata metadata1 = new Metadata();
+        metadata1.addValue("title", "Filtered Page");
+
+        Tuple tuple1 = createTuple(url1, "Content", metadata1);
+        bolt.execute(tuple1);
+
+        // Verify filtered document was NOT stored
+        try (Statement stmt = testConnection.createStatement();
+                ResultSet rs =
+                        stmt.executeQuery(
+                                "SELECT * FROM " + tableName + " WHERE url = '" + url1 + "'")) {
+            assertFalse(rs.next(), "Filtered document should not be stored");
+        }
+
+        // Document that should be indexed (has indexable=yes)
+        String url2 = "http://example.com/indexed-page";
+        Metadata metadata2 = new Metadata();
+        metadata2.addValue("title", "Indexed Page");
+        metadata2.addValue("indexable", "yes");
+
+        Tuple tuple2 = createTuple(url2, "Content", metadata2);
+        bolt.execute(tuple2);
+
+        // Verify indexed document WAS stored
+        try (Statement stmt = testConnection.createStatement();
+                ResultSet rs =
+                        stmt.executeQuery(
+                                "SELECT * FROM " + tableName + " WHERE url = '" + url2 + "'")) {
+            assertTrue(rs.next(), "Document with indexable=yes should be stored");
+            assertEquals("Indexed Page", rs.getString("title"));
+        }
+
+        // Both tuples should be acked with FETCHED status
+        assertEquals(2, output.getAckedTuples().size());
+        assertEquals(2, output.getEmitted(Constants.StatusStreamName).size());
+        bolt.cleanup();
+    }
+
+    @Test
+    void testMetadataExtraction() throws Exception {
+        // Configure to only extract specific metadata fields
+        Map<String, Object> conf = createBasicConfig();
+        // Only map title and description, not keywords
+        List<String> mdMapping = new ArrayList<>();
+        mdMapping.add("title");
+        mdMapping.add("description");
+        conf.put(AbstractIndexerBolt.metadata2fieldParamName, mdMapping);
+
+        IndexerBolt bolt = createBolt(conf);
+
+        String url = "http://example.com/metadata-test";
+        Metadata metadata = new Metadata();
+        metadata.addValue("title", "Extracted Title");
+        metadata.addValue("description", "Extracted Description");
+        metadata.addValue("keywords", "these,should,not,be,stored");
+        metadata.addValue("author", "Should Not Be Stored");
+
+        Tuple tuple = createTuple(url, "Content", metadata);
+        bolt.execute(tuple);
+
+        // Verify only configured metadata was stored
+        try (Statement stmt = testConnection.createStatement();
+                ResultSet rs =
+                        stmt.executeQuery(
+                                "SELECT * FROM " + tableName + " WHERE url = '" + url + "'")) {
+            assertTrue(rs.next());
+            assertEquals("Extracted Title", rs.getString("title"));
+            assertEquals("Extracted Description", rs.getString("description"));
+            // keywords column should be null since it wasn't in the mapping
+            assertNull(rs.getString("keywords"));
+        }
+
+        assertEquals(1, output.getAckedTuples().size());
+        bolt.cleanup();
+    }
+
+    @Test
+    void testMetadataAliasMapping() throws Exception {
+        // Configure metadata mapping with aliases
+        Map<String, Object> conf = createBasicConfig();
+        List<String> mdMapping = new ArrayList<>();
+        mdMapping.add("parse.title=title"); // map parse.title to title column
+        mdMapping.add("parse.description=description");
+        conf.put(AbstractIndexerBolt.metadata2fieldParamName, mdMapping);
+
+        IndexerBolt bolt = createBolt(conf);
+
+        String url = "http://example.com/alias-test";
+        Metadata metadata = new Metadata();
+        metadata.addValue("parse.title", "Title from Parser");
+        metadata.addValue("parse.description", "Description from Parser");
+
+        Tuple tuple = createTuple(url, "Content", metadata);
+        bolt.execute(tuple);
+
+        // Verify aliased metadata was stored correctly
+        try (Statement stmt = testConnection.createStatement();
+                ResultSet rs =
+                        stmt.executeQuery(
+                                "SELECT * FROM " + tableName + " WHERE url = '" + url + "'")) {
+            assertTrue(rs.next());
+            assertEquals("Title from Parser", rs.getString("title"));
+            assertEquals("Description from Parser", rs.getString("description"));
+        }
+        bolt.cleanup();
+    }
+
+    private Tuple createTuple(String url, String text, Metadata metadata) {
+        Tuple tuple = mock(Tuple.class);
+        when(tuple.getStringByField("url")).thenReturn(url);
+        when(tuple.getStringByField("text")).thenReturn(text);
+        when(tuple.getValueByField("metadata")).thenReturn(metadata);
+        return tuple;
+    }
+
+    private Map<String, Object> createBasicConfig() {
+        Map<String, Object> conf = new HashMap<>();
+
+        Map<String, String> sqlConnection = new HashMap<>();
+        sqlConnection.put("url", mysqlContainer.getJdbcUrl());
+        sqlConnection.put("user", mysqlContainer.getUsername());
+        sqlConnection.put("password", mysqlContainer.getPassword());
+        conf.put("sql.connection", sqlConnection);
+
+        conf.put(IndexerBolt.SQL_INDEX_TABLE_PARAM_NAME, tableName);
+        conf.put(AbstractIndexerBolt.urlFieldParamName, "url");
+
+        // Default metadata mapping
+        List<String> mdMapping = new ArrayList<>();
+        mdMapping.add("title");
+        mdMapping.add("description");
+        mdMapping.add("keywords");
+        conf.put(AbstractIndexerBolt.metadata2fieldParamName, mdMapping);
+
+        return conf;
+    }
+
+    private IndexerBolt createBolt(Map<String, Object> conf) {
+        IndexerBolt bolt = new IndexerBolt();
+        bolt.prepare(conf, TestUtil.getMockedTopologyContext(), new OutputCollector(output));
+        return bolt;
+    }
+}
