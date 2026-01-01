@@ -22,7 +22,8 @@ import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Timeout;
 import org.testcontainers.containers.MySQLContainer;
@@ -49,7 +50,7 @@ public abstract class AbstractSQLTest {
                     .withPassword("crawler")
                     .withReuse(true);
 
-    protected Connection testConnection;
+    protected static Connection testConnection;
 
     protected static Connection createConnection() throws SQLException {
         return DriverManager.getConnection(
@@ -66,16 +67,20 @@ public abstract class AbstractSQLTest {
         return sqlConnection;
     }
 
+    @BeforeAll
+    static void init() throws SQLException {
+        testConnection = createConnection();
+    }
+
     @BeforeEach
     void baseSetup() throws Exception {
-        testConnection = createConnection();
         setupTestTables();
     }
 
     protected abstract void setupTestTables() throws Exception;
 
-    @AfterEach
-    void baseCleanup() throws Exception {
+    @AfterAll
+    static void cleanup() throws Exception {
         if (testConnection != null) {
             testConnection.close();
         }
