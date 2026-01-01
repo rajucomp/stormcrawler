@@ -125,15 +125,12 @@ class StatusUpdaterBoltTest extends AbstractSQLTest {
 
     private Map<String, Object> createTestConfig() {
         Map<String, Object> conf = new HashMap<>();
-
         conf.put("sql.connection", createSqlConnectionConfig());
-
         conf.put("sql.status.table", "urls");
         conf.put("sql.status.max.urls.per.bucket", 10);
         conf.put("scheduler.class", "org.apache.stormcrawler.persistence.DefaultScheduler");
         conf.put("status.updater.cache.spec", "maximumSize=10000,expireAfterAccess=1h");
         conf.put("sql.update.batch.size", 1);
-
         return conf;
     }
 

@@ -309,19 +309,15 @@ class IndexerBoltTest extends AbstractSQLTest {
 
     private Map<String, Object> createBasicConfig() {
         Map<String, Object> conf = new HashMap<>();
-
         conf.put("sql.connection", createSqlConnectionConfig());
-
         conf.put(IndexerBolt.SQL_INDEX_TABLE_PARAM_NAME, tableName);
         conf.put(AbstractIndexerBolt.urlFieldParamName, "url");
-
         // Default metadata mapping
         List<String> mdMapping = new ArrayList<>();
         mdMapping.add("title");
         mdMapping.add("description");
         mdMapping.add("keywords");
         conf.put(AbstractIndexerBolt.metadata2fieldParamName, mdMapping);
-
         return conf;
     }
 
