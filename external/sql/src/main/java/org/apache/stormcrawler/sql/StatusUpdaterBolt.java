@@ -67,6 +67,7 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
 
     private PreparedStatement updatePreparedStmt;
     private PreparedStatement insertPreparedStmt;
+    private ScheduledExecutorService executor;
 
     private final Map<String, List<Tuple>> waitingAck = new HashMap<>();
 
@@ -132,7 +133,7 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
             throw new RuntimeException(e);
         }
 
-        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
+        executor = Executors.newSingleThreadScheduledExecutor();
         executor.scheduleAtFixedRate(
                 () -> {
                     try {
@@ -292,5 +293,20 @@ public class StatusUpdaterBolt extends AbstractStatusUpdaterBolt {
         closeResource(updatePreparedStmt, "update prepared statement");
         closeResource(insertPreparedStmt, "insert prepared statement");
         closeResource(connection, "connection");
+        closeExecutor();
+    }
+
+    private void closeExecutor() {
+        if (executor != null) {
+            executor.shutdown();
+            try {
+                if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
+                    executor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                executor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 }
