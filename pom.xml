@@ -88,6 +88,7 @@ under the License.
 		<jacoco.branchRatio>1.00</jacoco.branchRatio>
 		<jacoco.lineRatio>1.00</jacoco.lineRatio>
 		<jacoco.complexityRatio>1.00</jacoco.complexityRatio>
+        <mysql-connector-j>9.3.0</mysql-connector-j>
 
 		<skip.format.code>true</skip.format.code>
 
@@ -671,6 +672,13 @@ under the License.
                 <groupId>commons-codec</groupId>
                 <artifactId>commons-codec</artifactId>
                 <version>${commons.codec.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.mysql</groupId>
+                <artifactId>mysql-connector-j</artifactId>
+                <version>${mysql-connector-j}</version>
+                <scope>test</scope>
             </dependency>
 
 		</dependencies>

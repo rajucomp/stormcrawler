@@ -46,13 +46,16 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
 
 @Testcontainers(disabledWithoutDocker = true)
 class SQLSpoutTest {
 
+    private static final DockerImageName MYSQL_IMAGE = DockerImageName.parse("mysql:8.4.0");
+
     @Container
     private static final MySQLContainer<?> mysqlContainer =
-            new MySQLContainer<>("mysql:8.4.0")
+            new MySQLContainer<>(MYSQL_IMAGE)
                     .withDatabaseName("crawl")
                     .withUsername("crawler")
                     .withPassword("crawler");
