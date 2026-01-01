@@ -53,13 +53,6 @@ abstract class AbstractSQLTest {
 
     static Connection testConnection;
 
-    static Connection createConnection() throws SQLException {
-        return DriverManager.getConnection(
-                MYSQL_CONTAINER.getJdbcUrl(),
-                MYSQL_CONTAINER.getUsername(),
-                MYSQL_CONTAINER.getPassword());
-    }
-
     static Map<String, String> createSqlConnectionConfig() {
         Map<String, String> sqlConnection = new HashMap<>();
         sqlConnection.put("url", MYSQL_CONTAINER.getJdbcUrl());
@@ -76,7 +69,11 @@ abstract class AbstractSQLTest {
 
     @BeforeAll
     static void init() throws SQLException {
-        testConnection = createConnection();
+        testConnection =
+                DriverManager.getConnection(
+                        MYSQL_CONTAINER.getJdbcUrl(),
+                        MYSQL_CONTAINER.getUsername(),
+                        MYSQL_CONTAINER.getPassword());
     }
 
     @BeforeEach
