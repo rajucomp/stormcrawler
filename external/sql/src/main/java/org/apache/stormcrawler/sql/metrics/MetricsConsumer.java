@@ -23,6 +23,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Map;
+import java.util.Map.Entry;
 import org.apache.storm.metric.api.IMetricsConsumer;
 import org.apache.storm.task.IErrorReporter;
 import org.apache.storm.task.TopologyContext;
@@ -34,7 +35,7 @@ import org.slf4j.LoggerFactory;
 
 public class MetricsConsumer implements IMetricsConsumer {
 
-    private static final Logger LOG = LoggerFactory.getLogger(MetricsConsumer.class);
+    private final Logger LOG = LoggerFactory.getLogger(getClass());
     private Connection connection;
     private String query;
 
@@ -63,11 +64,13 @@ public class MetricsConsumer implements IMetricsConsumer {
     public void handleDataPoints(TaskInfo taskInfo, Collection<DataPoint> dataPoints) {
         final Timestamp now = Timestamp.from(Instant.now());
 
-        try (PreparedStatement preparedStmt = connection.prepareStatement(query)) {
+        try {
+            PreparedStatement preparedStmt = connection.prepareStatement(query);
             for (DataPoint dataPoint : dataPoints) {
                 handleDataPoints(preparedStmt, taskInfo, dataPoint.name, dataPoint.value, now);
             }
             preparedStmt.executeBatch();
+            preparedStmt.close();
         } catch (SQLException ex) {
             LOG.error(ex.getMessage(), ex);
             throw new RuntimeException(ex);
@@ -80,25 +83,24 @@ public class MetricsConsumer implements IMetricsConsumer {
             final String nameprefix,
             final Object value,
             final Timestamp now) {
-        if (value instanceof final Number number) {
+        if (value instanceof Number) {
             try {
-                indexDataPoint(preparedStmt, taskInfo, now, nameprefix, (number).doubleValue());
+                indexDataPoint(
+                        preparedStmt, taskInfo, now, nameprefix, ((Number) value).doubleValue());
             } catch (SQLException e) {
                 LOG.error("Exception while indexing datapoint", e);
             }
-        } else if (value instanceof Map<?, ?> map) {
-            for (Map.Entry<?, ?> entry : map.entrySet()) {
-                if (entry.getKey() instanceof String key) {
-                    String newNamePrefix = nameprefix + "." + key;
-                    handleDataPoints(preparedStmt, taskInfo, newNamePrefix, entry.getValue(), now);
-                }
+        } else if (value instanceof Map) {
+            for (Entry<String, Object> entry : ((Map<String, Object>) value).entrySet()) {
+                String newnameprefix = nameprefix + "." + entry.getKey();
+                handleDataPoints(preparedStmt, taskInfo, newnameprefix, entry.getValue(), now);
             }
-        } else if (value instanceof Collection<?> collection) {
-            for (Object collectionObj : collection) {
+        } else if (value instanceof Collection) {
+            for (Object collectionObj : (Collection<Object>) value) {
                 handleDataPoints(preparedStmt, taskInfo, nameprefix, collectionObj, now);
             }
         } else {
-            LOG.warn("Found data point value {} of {}", nameprefix, value.getClass());
+            LOG.warn("Found data point value {} of {}", nameprefix, value.getClass().toString());
         }
     }
 
