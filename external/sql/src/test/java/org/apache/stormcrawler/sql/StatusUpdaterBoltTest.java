@@ -32,12 +32,14 @@ import org.apache.stormcrawler.Metadata;
 import org.apache.stormcrawler.TestOutputCollector;
 import org.apache.stormcrawler.TestUtil;
 import org.apache.stormcrawler.persistence.Status;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class StatusUpdaterBoltTest extends AbstractSQLTest {
 
     private TestOutputCollector output;
+    private StatusUpdaterBolt bolt;
 
     @Override
     protected void setupTestTables() throws Exception {
@@ -59,11 +61,16 @@ class StatusUpdaterBoltTest extends AbstractSQLTest {
     @BeforeEach
     void setup() {
         output = new TestOutputCollector();
+        bolt = createBolt();
+    }
+
+    @AfterEach
+    void close() {
+        bolt.cleanup();
     }
 
     @Test
     void testStoreDiscoveredURL() throws Exception {
-        StatusUpdaterBolt bolt = createBolt();
         String url = "http://example.com/page1";
         Metadata metadata = new Metadata();
         metadata.addValue("key1", "value1");
@@ -88,7 +95,6 @@ class StatusUpdaterBoltTest extends AbstractSQLTest {
 
     @Test
     void testUpdateURL() throws Exception {
-        StatusUpdaterBolt bolt = createBolt();
         String url = "http://example.com/page2";
         Metadata metadata = new Metadata();
         metadata.addValue("key1", "value1");
@@ -131,9 +137,10 @@ class StatusUpdaterBoltTest extends AbstractSQLTest {
     }
 
     private StatusUpdaterBolt createBolt() {
-        StatusUpdaterBolt bolt = new StatusUpdaterBolt();
+        StatusUpdaterBolt statusUpdaterBolt = new StatusUpdaterBolt();
         Map<String, Object> conf = createTestConfig();
-        bolt.prepare(conf, TestUtil.getMockedTopologyContext(), new OutputCollector(output));
-        return bolt;
+        statusUpdaterBolt.prepare(
+                conf, TestUtil.getMockedTopologyContext(), new OutputCollector(output));
+        return statusUpdaterBolt;
     }
 }
