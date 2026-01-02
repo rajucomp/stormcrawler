@@ -71,16 +71,9 @@ class IndexerBoltTest extends AbstractSQLTest {
     @Test
     void testBasicIndexing() throws Exception {
         IndexerBolt bolt = createBolt(createBasicConfig());
-
         String url = "http://example.com/page1";
-        String text = "This is the page content";
-        Metadata metadata = new Metadata();
-        metadata.addValue("title", "Test Page Title");
-        metadata.addValue("description", "Test page description");
-        metadata.addValue("keywords", "test, page, keywords");
 
-        Tuple tuple = createTuple(url, text, metadata);
-        bolt.execute(tuple);
+        executeTuple(bolt, url, "This is the page content", getMetadata());
 
         // Verify URL was stored in database
         try (Statement stmt = testConnection.createStatement();
@@ -110,34 +103,15 @@ class IndexerBoltTest extends AbstractSQLTest {
         IndexerBolt bolt = createBolt(createBasicConfig());
 
         String url = "http://example.com/page2";
-
-        // First indexing
-        Metadata metadata1 = new Metadata();
-        metadata1.addValue("title", "Original Title");
-        metadata1.addValue("description", "Original description");
-
-        Tuple tuple1 = createTuple(url, "Original content", metadata1);
-        bolt.execute(tuple1);
-
-        // Verify first insert
-        try (Statement stmt = testConnection.createStatement();
-                ResultSet rs =
-                        stmt.executeQuery(
-                                "SELECT * FROM " + tableName + " WHERE url = '" + url + "'")) {
-            assertTrue(rs.next());
-            assertEquals("Original Title", rs.getString("title"));
-            assertEquals("Original description", rs.getString("description"));
-        }
+        executeTuple(bolt, url, "Original content", getMetadata());
 
         // Second indexing with updated content (same URL)
-        Metadata metadata2 = new Metadata();
-        metadata2.addValue("title", "Updated Title");
-        metadata2.addValue("description", "Updated description");
+        Metadata metadata = new Metadata();
+        metadata.addValue("title", "Updated Title");
+        metadata.addValue("description", "Updated description");
 
-        Tuple tuple2 = createTuple(url, "Updated content", metadata2);
-        bolt.execute(tuple2);
+        executeTuple(bolt, url, "Updated content", metadata);
 
-        // Verify ON DUPLICATE KEY UPDATE worked - should have updated values
         try (Statement stmt = testConnection.createStatement();
                 ResultSet rs =
                         stmt.executeQuery(
@@ -145,9 +119,9 @@ class IndexerBoltTest extends AbstractSQLTest {
             assertTrue(rs.next());
             assertEquals("Updated Title", rs.getString("title"));
             assertEquals("Updated description", rs.getString("description"));
+            assertEquals("test, page, keywords", rs.getString("keywords"));
         }
 
-        // Verify both tuples were acked
         assertEquals(2, output.getAckedTuples().size());
         bolt.cleanup();
     }
@@ -161,8 +135,7 @@ class IndexerBoltTest extends AbstractSQLTest {
         metadata.addValue("title", "Should Not Be Indexed");
         metadata.addValue(RobotsTags.ROBOTS_NO_INDEX, "true");
 
-        Tuple tuple = createTuple(url, "Content", metadata);
-        bolt.execute(tuple);
+        executeTuple(bolt, url, "Content", metadata);
 
         // Verify URL was NOT stored in database
         try (Statement stmt = testConnection.createStatement();
@@ -194,8 +167,7 @@ class IndexerBoltTest extends AbstractSQLTest {
         Metadata metadata1 = new Metadata();
         metadata1.addValue("title", "Filtered Page");
 
-        Tuple tuple1 = createTuple(url1, "Content", metadata1);
-        bolt.execute(tuple1);
+        executeTuple(bolt, url1, "Content", metadata1);
 
         // Verify filtered document was NOT stored
         try (Statement stmt = testConnection.createStatement();
@@ -248,8 +220,7 @@ class IndexerBoltTest extends AbstractSQLTest {
         metadata.addValue("keywords", "these,should,not,be,stored");
         metadata.addValue("author", "Should Not Be Stored");
 
-        Tuple tuple = createTuple(url, "Content", metadata);
-        bolt.execute(tuple);
+        executeTuple(bolt, url, "Content", metadata);
 
         // Verify only configured metadata was stored
         try (Statement stmt = testConnection.createStatement();
@@ -283,8 +254,7 @@ class IndexerBoltTest extends AbstractSQLTest {
         metadata.addValue("parse.title", "Title from Parser");
         metadata.addValue("parse.description", "Description from Parser");
 
-        Tuple tuple = createTuple(url, "Content", metadata);
-        bolt.execute(tuple);
+        executeTuple(bolt, url, "Content", metadata);
 
         // Verify aliased metadata was stored correctly
         try (Statement stmt = testConnection.createStatement();
@@ -306,6 +276,11 @@ class IndexerBoltTest extends AbstractSQLTest {
         return tuple;
     }
 
+    private void executeTuple(IndexerBolt bolt, String url, String text, Metadata metadata) {
+        Tuple tuple = createTuple(url, text, metadata);
+        bolt.execute(tuple);
+    }
+
     private Map<String, Object> createBasicConfig() {
         Map<String, Object> conf = new HashMap<>();
         conf.put("sql.connection", createSqlConnectionConfig());
@@ -324,5 +299,13 @@ class IndexerBoltTest extends AbstractSQLTest {
         IndexerBolt bolt = new IndexerBolt();
         bolt.prepare(conf, TestUtil.getMockedTopologyContext(), new OutputCollector(output));
         return bolt;
+    }
+
+    private Metadata getMetadata() {
+        Metadata metadata = new Metadata();
+        metadata.addValue("title", "Test Page Title");
+        metadata.addValue("description", "Test page description");
+        metadata.addValue("keywords", "test, page, keywords");
+        return metadata;
     }
 }
