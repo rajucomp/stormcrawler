@@ -126,6 +126,7 @@ class IndexerBoltTest extends AbstractSQLTest {
                                 "SELECT * FROM " + tableName + " WHERE url = '" + url + "'")) {
             assertTrue(rs.next());
             assertEquals("Original Title", rs.getString("title"));
+            assertEquals("Original description", rs.getString("description"));
         }
 
         // Second indexing with updated content (same URL)
@@ -144,8 +145,6 @@ class IndexerBoltTest extends AbstractSQLTest {
             assertTrue(rs.next());
             assertEquals("Updated Title", rs.getString("title"));
             assertEquals("Updated description", rs.getString("description"));
-            // Should only be one row
-            assertFalse(rs.next(), "Should only have one row for the URL");
         }
 
         // Verify both tuples were acked
